@@ -1,17 +1,26 @@
 //! Device backends for Sunmi terminals.
 //!
-//! - `adb`: standard adb client wrapping the Sunmi firmware `systool`
-//!   service (`adb -s <serial> shell systool ...`).
-//! - `fastboot`: standard fastboot client for the ROM flash flow guided by
-//!   `sunmiboot_scatter.txt`.
+//! `Adb` is a dispatch enum over two backends sharing the same API:
 //!
-//! v1 shells out to the `adb`/`fastboot` binaries from the system PATH.
-//! v2 (planned): native protocol implementation over USB (`nusb`) with real
-//! transfer progress.
+//! - `Spawned`: shells out to the `adb`/`fastboot` binaries from the
+//!   system PATH (v1, battle-tested).
+//! - `Native`: speaks the ADB protocol directly over USB via `nusb` (v2) —
+//!   no external binary, real device-level control. Auth reuses
+//!   `~/.android/adbkey` so already-authorized terminals connect silently.
+//!
+//! The Sunmi firmware exposes its privileged `systool` service through the
+//! normal shell transport (`adb shell systool ...`); on production builds
+//! generic shell is blocked but `shell:systool` stays whitelisted — both
+//! backends work identically for the whitelist.
+//!
+//! Files are staged on the device before `systool install` runs:
+//! `systool version` reports the staging dir (`systool_tmp_dir=...`), with
+//! `/data/local/tmp` as fallback (validated on P2-A11 production).
 
 pub mod adb;
 pub mod fastboot;
-mod process;
+pub mod native;
+pub mod process;
 
 pub use adb::{Adb, Device, DeviceState};
 pub use fastboot::Fastboot;

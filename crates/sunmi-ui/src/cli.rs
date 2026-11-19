@@ -10,10 +10,7 @@ use sunmi_core::download::{
 use sunmi_core::filetype::FileKind;
 
 async fn adb_or_exit() -> Adb {
-    let Some(adb) = Adb::discover() else {
-        eprintln!("'adb' not found in PATH. Install platform-tools or set PATH.");
-        std::process::exit(1);
-    };
+    let adb = Adb::auto().await;
     adb
 }
 

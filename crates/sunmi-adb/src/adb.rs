@@ -3,11 +3,9 @@ use std::str::FromStr;
 
 use crate::process::{find_in_path, run_program, ToolError};
 
-/// Standard ADB client. The Sunmi firmware exposes its privileged `systool`
-/// service through the normal `shell` transport, so no vendor fork of adb is
-/// required.
+/// Standard ADB client that shells out to the `adb` binary (v1 backend).
 #[derive(Debug, Clone)]
-pub struct Adb {
+pub struct AdbSpawn {
     path: std::path::PathBuf,
 }
 
@@ -42,7 +40,7 @@ impl FromStr for DeviceState {
     }
 }
 
-impl Adb {
+impl AdbSpawn {
     pub fn new(path: impl AsRef<Path>) -> Self {
         Self {
             path: path.as_ref().to_path_buf(),
@@ -158,5 +156,111 @@ P2B67890\toffline
         assert_eq!(devices[0].serial, "P2A12345");
         assert_eq!(devices[0].state, DeviceState::Device);
         assert_eq!(devices[1].state, DeviceState::Offline);
+    }
+}
+
+
+/// Backend dispatch: native USB client (v2) or spawned `adb` binary (v1).
+#[derive(Debug, Clone)]
+pub enum Adb {
+    Spawned(AdbSpawn),
+    Native(crate::native::services::NativeBackend),
+}
+
+impl Adb {
+    pub fn new(path: impl AsRef<std::path::Path>) -> Self {
+        Self::Spawned(AdbSpawn::new(path))
+    }
+
+    /// Looks for `adb` on the system PATH (spawned backend).
+    pub fn discover() -> Option<Self> {
+        AdbSpawn::discover().map(Self::Spawned)
+    }
+
+    /// v2 selection: prefer the native USB client when it can see devices;
+    /// fall back to the spawned binary otherwise. `SUNMI_ADB_BACKEND=spawn`
+    /// forces the v1 backend.
+    pub async fn auto() -> Self {
+        if std::env::var("SUNMI_ADB_BACKEND").as_deref() != Ok("spawn") {
+            let native = crate::native::services::NativeBackend::new();
+            if let Ok(devices) = native.devices().await {
+                if !devices.is_empty() {
+                    return Self::Native(native);
+                }
+            }
+        }
+        Self::discover().unwrap_or_else(|| Self::Native(crate::native::services::NativeBackend::new()))
+    }
+
+    pub async fn devices(&self) -> Result<Vec<Device>, ToolError> {
+        match self {
+            Adb::Spawned(a) => a.devices().await,
+            Adb::Native(n) => n.devices().await,
+        }
+    }
+
+    pub async fn kill_server(&self) -> Result<String, ToolError> {
+        match self {
+            Adb::Spawned(a) => a.kill_server().await,
+            Adb::Native(n) => n.kill_server().await,
+        }
+    }
+
+    /// Forwards the Sunmi firmware `systool` service:
+    /// `adb -s <serial> shell systool <args>`.
+    pub async fn systool(&self, serial: &str, args: &str) -> Result<String, ToolError> {
+        match self {
+            Adb::Spawned(a) => a.systool(serial, args).await,
+            Adb::Native(n) => n.systool(serial, args).await,
+        }
+    }
+
+    pub async fn shell(&self, serial: &str, command: &str) -> Result<String, ToolError> {
+        match self {
+            Adb::Spawned(a) => a.shell(serial, command).await,
+            Adb::Native(n) => n.shell(serial, command).await,
+        }
+    }
+
+    /// `systool version` — the firmware staging-dir probe.
+    pub async fn version(&self, serial: &str) -> Result<String, ToolError> {
+        match self {
+            Adb::Spawned(a) => a.version(serial).await,
+            Adb::Native(n) => n.version(serial).await,
+        }
+    }
+
+    /// Port of `reboot_to_sunmiboot`.
+    pub async fn reboot_bootloader(&self, serial: &str) -> Result<String, ToolError> {
+        match self {
+            Adb::Spawned(a) => a.reboot_bootloader(serial).await,
+            Adb::Native(n) => n.reboot_bootloader(serial).await,
+        }
+    }
+
+    /// `adb -s <serial> push <local> <remote>` (used for staged installs).
+    pub async fn push(
+        &self,
+        serial: &str,
+        local: &std::path::Path,
+        remote: &str,
+    ) -> Result<String, ToolError> {
+        match self {
+            Adb::Spawned(a) => a.push(serial, local, remote).await,
+            Adb::Native(n) => n.push(serial, local, remote).await,
+        }
+    }
+
+    /// `adb -s <serial> pull <remote> <local>` (used for `packlogs.zip`).
+    pub async fn pull(
+        &self,
+        serial: &str,
+        remote: &str,
+        local: &Path,
+    ) -> Result<String, ToolError> {
+        match self {
+            Adb::Spawned(a) => a.pull(serial, remote, local).await,
+            Adb::Native(n) => n.pull(serial, remote, local).await,
+        }
     }
 }

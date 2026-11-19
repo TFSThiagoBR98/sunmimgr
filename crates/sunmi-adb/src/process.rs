@@ -17,6 +17,8 @@ pub enum ToolError {
         status: ExitStatus,
         stderr: String,
     },
+    #[error("adb protocol error: {0}")]
+    Protocol(String),
 }
 
 /// Runs a program and captures its stdout, requiring exit status 0.

@@ -74,18 +74,11 @@ impl SunmiApp {
     fn new(cx: &mut Context<Self>) -> Self {
         let (events_tx, events_rx) = async_channel::unbounded::<UiEvent>();
 
-        // Device discovery loop (tokio): polls `adb devices` every 2 s and
+        // Device discovery loop (tokio): polls devices every 2 s and
         // pushes results to the UI bridge.
         let poll_tx = events_tx.clone();
         tokio_rt().spawn(async move {
-            let Some(adb) = Adb::discover() else {
-                let _ = poll_tx
-                    .send(UiEvent::Log(
-                        "'adb' não encontrado no PATH (instale o platform-tools)".to_string(),
-                    ))
-                    .await;
-                return;
-            };
+            let adb = Adb::auto().await;
             loop {
                 match adb.devices().await {
                     Ok(devices) => {

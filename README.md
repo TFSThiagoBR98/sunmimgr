@@ -61,9 +61,22 @@ responde normalmente). Comandos suportados pelo daemon:
 Flash de ROM usa fastboot padrão guiado por `sunmiboot_scatter.txt`
 (`flash <partição> <arquivo>` / `erase` / `reboot`).
 
-**v1**: spawn dos binários `adb`/`fastboot` do sistema.
-**v2 (planejado)**: protocolo ADB/fastboot nativo em Rust (`nusb`), progresso
-real de push e sem dependência externa.
+**v1 (padrão `spawn`)**: spawn dos binários `adb`/`fastboot` do sistema.
+**v2 (padrão `native`)**: cliente ADB nativo em Rust sobre USB (`nusb`) — sem
+binário externo nem server adb. Autentica com a chave padrão
+`~/.android/adbkey` (terminais já autorizados conectam sem re-aprovação).
+Seleção via `Adb::auto()` (nativo quando há dispositivos USB, fallback
+spawn); `SUNMI_ADB_BACKEND=spawn` força o v1.
+
+Descobertas do adbd da Sunmi (firmware de produção) que o cliente nativo
+reproduz:
+- banner do CNXN **vazio** — payload de identity derruba o adbd (fault);
+- header e payload de cada mensagem como **dois URBs USB separados**
+  (write único faz o adbd parsear o payload como próximo header);
+- respostas com **checksum=0** (SKIP_CHECKSUM) — validação relaxada;
+- WRTE/CLSE do host usam `arg0 = local-id do host, arg1 = id do device`.
+
+**fastboot (flash de ROM)**: ainda via binário do sistema (v2 pendente).
 
 ### sunmi-ui
 Planejada com [GPUI](https://github.com/zed-industries/zed) (framework do Zed).
