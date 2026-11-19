@@ -1,28 +1,100 @@
 //! sunmi-ui — application crate.
 //!
-//! Today: CLI smoke test + `install` flow over the `sunmi-core` downloader.
-//! Next: GPUI window (dependency is commented out in Cargo.toml until the
-//! Linux backend is validated).
+//! `sunmi-ui` (no args) launches the GPUI desktop app; `sunmi-ui install ...`
+//! / `sunmi-ui info` run the CLI flows (kept for field testing).
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use gpui::{
+    div, prelude::*, px, rgb, size, App, Bounds, Context, IntoElement, ParentElement, Render,
+    Styled, Window, WindowBounds, WindowOptions,
+};
 use sunmi_adb::Adb;
 use sunmi_core::download::{
     validate, DownloadEvent, DownloadItem, DownloadOptions, Downloader,
 };
 use sunmi_core::filetype::FileKind;
 
-#[tokio::main]
-async fn main() {
+fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
-        Some("install") if args.len() > 1 => install_files(&args[1..]).await,
-        Some("info") => device_info().await,
-        _ => list_devices().await,
+        Some("install") if args.len() > 1 => cli_main(install_files(&args[1..])),
+        Some("info") => cli_main(device_info()),
+        Some("devices") => cli_main(list_devices()),
+        _ => gui_main(),
     }
 }
 
+// ---------------------------------------------------------------------------
+// GUI (GPUI)
+// ---------------------------------------------------------------------------
+
+struct SunmiWindow {
+    status: String,
+}
+
+impl Render for SunmiWindow {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .justify_center()
+            .items_center()
+            .gap_3()
+            .bg(rgb(0xf5f5f4))
+            .text_color(rgb(0x1c1917))
+            .child(
+                div()
+                    .text_xl()
+                    .font_weight(gpui::FontWeight::BOLD)
+                    .child("sunmimgr"),
+            )
+            .child(div().child(self.status.clone()))
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(rgb(0x78716c))
+                    .child("backend validado: App, Apn, AppCrp em produção"),
+            )
+    }
+}
+
+fn gui_main() {
+    gpui::Application::new().run(|cx: &mut App| {
+        let bounds = Bounds::centered(None, size(px(900.), px(600.)), cx);
+        cx.open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(bounds)),
+                titlebar: Some(gpui::TitlebarOptions {
+                    title: Some("sunmimgr — Sunmi terminal manager".into()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            |_window, cx| {
+                cx.new(|_| SunmiWindow {
+                    status: "device discovery coming next".to_string(),
+                })
+            },
+        )
+        .expect("failed to open window");
+        cx.activate(true);
+    });
+}
+
+// ---------------------------------------------------------------------------
+// CLI (field-test flows)
+// ---------------------------------------------------------------------------
+
+fn cli_main(fut: impl std::future::Future<Output = ()>) {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("failed to build tokio runtime");
+    rt.block_on(fut);
+}
 async fn adb_or_exit() -> Adb {
     let Some(adb) = Adb::discover() else {
         eprintln!("'adb' not found in PATH. Install platform-tools or set PATH.");
@@ -164,3 +236,5 @@ async fn install_files(files: &[String]) {
         }
     }
 }
+
+

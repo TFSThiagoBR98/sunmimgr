@@ -22,5 +22,15 @@ tokio-util = { version = "0.7", features = ["rt"] }
 chrono = { version = "0.4", features = ["clock"] }
 anyhow = "1"
 
+# GPUI published to crates.io (0.2.x); the 0.3 gpui_platform split is not
+# published yet. Default features already enable font-kit + wayland + x11.
+gpui = "0.2"
+
 sunmi-core = { path = "crates/sunmi-core" }
 sunmi-adb = { path = "crates/sunmi-adb" }
+
+# xattr 0.2.3 (dep of zed-async-tar via gpui) references libc::ENOATTR, which
+# was removed from newer libc on Linux (ENOATTR == ENODATA there). Vendored
+# with that one-line fix.
+[patch.crates-io]
+xattr = { path = "vendor/xattr" }
