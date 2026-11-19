@@ -75,15 +75,16 @@ jobs:
         if: matrix.name == 'linux-x86_64'
         shell: bash
         run: |
-          mkdir -p dist/sunmimgr
-          cp target/x86_64-unknown-linux-gnu/release/sunmi-ui dist/sunmimgr/sunmimgr
-          cp README.md dist/sunmimgr/
-          mkdir -p dist/sunmimgr/udev
-          cat > dist/sunmimgr/udev/51-sunmi.rules <<'EOF'
+          STAGING="$(mktemp -d)/sunmimgr"
+          mkdir -p "$STAGING/udev"
+          cp target/x86_64-unknown-linux-gnu/release/sunmi-ui "$STAGING/sunmimgr"
+          cp README.md "$STAGING/"
+          cat > "$STAGING/udev/51-sunmi.rules" <<'EOF'
           # Sunmi POS terminals (MediaTek ADB) - USB access for adb
           SUBSYSTEM=="usb", ATTR{idVendor}=="0e8d", ATTR{idProduct}=="2006", MODE="0666", GROUP="plugdev"
           EOF
-          tar -czf "dist/sunmimgr-${{ matrix.name }}.tar.gz" -C dist sunmimgr
+          mkdir -p dist
+          tar -czf "dist/sunmimgr-${{ matrix.name }}.tar.gz" -C "$(dirname "$STAGING")" sunmimgr
 
       - name: Package (Windows zip)
         if: matrix.name == 'windows-x86_64'
@@ -97,7 +98,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.name }}
-          path: dist/*
+          path: dist/*.*
 
   publish:
     needs: build
@@ -113,10 +114,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
+          FILES=$(find dist -type f | sort | xargs echo)
+          echo "uploading: $FILES"
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+            gh release upload "$TAG" $FILES --repo "$GITHUB_REPOSITORY" --clobber
           else
-            gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" \
+            gh release create "$TAG" $FILES --repo "$GITHUB_REPOSITORY" \
               --title "sunmimgr $TAG" \
               --notes "Multiplataforma Sunmi POS terminal manager (Rust + GPUI).
 
