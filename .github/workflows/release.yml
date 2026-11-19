@@ -69,7 +69,6 @@ jobs:
           EOF
           mkdir -p dist
           zip -r -q "dist/sunmimgr-${{ matrix.name }}.zip" "$APP"
-          cp "target/aarch64-apple-darwin/release/sunmi-ui" dist/ 2>/dev/null || true
 
       - name: Package (Linux tar.gz)
         if: matrix.name == 'linux-x86_64'
@@ -91,14 +90,18 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item target/x86_64-pc-windows-msvc/release/sunmi-ui.exe dist/sunmimgr.exe
-          Copy-Item README.md dist/
-          Compress-Archive -Path dist/sunmimgr.exe, dist/README.md -DestinationPath dist/sunmimgr-${{ matrix.name }}.zip
+          $stage = Join-Path $env:RUNNER_TEMP "pkg"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item target/x86_64-pc-windows-msvc/release/sunmi-ui.exe "$stage/sunmimgr.exe"
+          Copy-Item README.md "$stage/"
+          Compress-Archive -Path "$stage/sunmimgr.exe", "$stage/README.md" -DestinationPath "dist/sunmimgr-${{ matrix.name }}.zip"
 
       - uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.name }}
-          path: dist/*.*
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
 
   publish:
     needs: build
