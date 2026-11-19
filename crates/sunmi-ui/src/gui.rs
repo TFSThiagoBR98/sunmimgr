@@ -12,8 +12,8 @@ use std::time::Duration;
 
 use gpui::{
     div, prelude::*, px, rgb, size, App, AnyElement, Bounds, ClickEvent, Context, Div,
-    FontWeight, IntoElement, PathPromptOptions, SharedString, Stateful, Styled, Window,
-    WindowBounds, WindowOptions,
+    FontWeight, IntoElement, PathPromptOptions, ScrollHandle, SharedString, Stateful, Styled,
+    Window, WindowBounds, WindowOptions,
 };
 use sunmi_adb::{Adb, Device, DeviceState};
 use sunmi_core::download::{
@@ -63,6 +63,7 @@ struct SunmiApp {
     devices: Vec<Device>,
     queue: Vec<QueueItem>,
     log: VecDeque<String>,
+    log_scroll: ScrollHandle,
     status: String,
     busy: bool,
     stop_token: Option<CancellationToken>,
@@ -120,6 +121,7 @@ impl SunmiApp {
             devices: Vec::new(),
             queue: Vec::new(),
             log: VecDeque::new(),
+            log_scroll: ScrollHandle::new(),
             status: "Aguardando dispositivos...".to_string(),
             busy: false,
             stop_token: None,
@@ -132,6 +134,8 @@ impl SunmiApp {
         while self.log.len() > LOG_LINES {
             self.log.pop_front();
         }
+        // Tail-follow: keep the newest lines visible as they arrive.
+        self.log_scroll.scroll_to_bottom();
     }
 
     fn on_ui_event(&mut self, event: UiEvent) {
@@ -375,8 +379,17 @@ impl Render for SunmiApp {
             .flex_col()
             .bg(rgb(GRAY_LIGHT))
             .text_color(rgb(GRAY_DARK))
-            .p_4()
-            .gap_2()
+            // CSD titlebar with window controls (client-side decorations)
+            .child(titlebar(cx))
+            // content
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .flex()
+                    .flex_col()
+                    .p_4()
+                    .gap_2()
             // header: title + status
             .child(
                 div()
@@ -436,13 +449,77 @@ impl Render for SunmiApp {
             )
             // log
             .child(section_title("Log"))
-            .child(log_view(&self.log))
+            .child(log_view(&self.log_scroll, &self.log)),
+        )
     }
 }
 
 // ---------------------------------------------------------------------------
 // render helpers
 // ---------------------------------------------------------------------------
+
+/// Client-side titlebar: drag area (starts window move) + minimize,
+/// maximize and close buttons. Works the same on Wayland and later macOS
+/// (where gpui ignores decorations and uses its own controls).
+fn titlebar(cx: &mut Context<SunmiApp>) -> AnyElement {
+    div()
+        .id("titlebar")
+        .flex()
+        .items_center()
+        .justify_between()
+        .h(px(36.))
+        .pl_3()
+        .bg(rgb(GRAY_DARK))
+        .text_color(rgb(0xffffff))
+        .child(
+            // drag area: only the title strip, not the buttons
+            div()
+                .id("title-drag")
+                .flex_1()
+                .h_full()
+                .text_sm()
+                .font_weight(FontWeight::SEMIBOLD)
+                .on_mouse_down(
+                    gpui::MouseButton::Left,
+                    cx.listener(|_this, _ev, window, _cx| window.start_window_move()),
+                )
+                .child("sunmimgr — Sunmi terminal manager"),
+        )
+        .child(
+            div()
+                .flex()
+                .h_full()
+                .child(
+                    div()
+                        .id("min-btn")
+                        .w(px(44.))
+                        .h_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_sm()
+                        .cursor_pointer()
+                        .hover(|style| style.bg(rgb(0x44403c)))
+                        .on_click(cx.listener(|_this, _ev, window, _cx| window.minimize_window()))
+                        .child("–"),
+                )
+                .child(
+                    div()
+                        .id("close-btn")
+                        .w(px(44.))
+                        .h_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_sm()
+                        .cursor_pointer()
+                        .hover(|style| style.bg(rgb(0xb91c1c)))
+                        .on_click(cx.listener(|_this, _ev, window, _cx| window.remove_window()))
+                        .child("✕"),
+                ),
+        )
+        .into_any_element()
+}
 
 fn section_title(text: &'static str) -> AnyElement {
     div()
@@ -621,22 +698,21 @@ fn button(
         .child(label)
 }
 
-fn log_view(log: &VecDeque<String>) -> AnyElement {
+fn log_view(scroll: &ScrollHandle, log: &VecDeque<String>) -> AnyElement {
     div()
+        .id("log-scroll")
         .flex_1()
         .min_h_0()
+        .overflow_y_scroll()
+        .track_scroll(scroll)
         .flex()
         .flex_col()
-        .justify_end()
         .gap_0p5()
         .bg(rgb(0x0c0a09))
         .text_color(rgb(0xa8a29e))
         .rounded_md()
         .p_2()
-        .overflow_hidden()
-        .children(log.iter().rev().take(LOG_VISIBLE).rev().map(|line| {
-            div().text_xs().child(line.clone())
-        }))
+        .children(log.iter().map(|line| div().text_xs().child(line.clone())))
         .into_any_element()
 }
 
@@ -650,6 +726,10 @@ pub fn run() {
                 title: Some("sunmimgr — Sunmi terminal manager".into()),
                 ..Default::default()
             }),
+            // Client-side decorations: the app draws its own titlebar with
+            // minimize/maximize/close (GNOME mutter doesn't reliably provide
+            // server-side decorations). Ignored on macOS.
+            window_decorations: Some(gpui::WindowDecorations::Client),
             ..Default::default()
         };
         cx.open_window(options, |_window, cx| cx.new(SunmiApp::new))
