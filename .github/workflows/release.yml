@@ -1,0 +1,124 @@
+name: release
+
+# Builds release packages for macOS (M-series .app), Linux and Windows and
+# publishes them to the GitHub Release for the pushed tag (v*).
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            name: macos-arm64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            name: linux-x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            name: windows-x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Build (release)
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package (macOS .app)
+        if: matrix.name == 'macos-arm64'
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          APP="SunmiMgr.app"
+          mkdir -p "$APP/Contents/MacOS"
+          cp "target/aarch64-apple-darwin/release/sunmi-ui" "$APP/Contents/MacOS/sunmimgr"
+          sed -e "s/@VERSION@/$VERSION/g" > "$APP/Contents/Info.plist" <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key><string>SunmiMgr</string>
+            <key>CFBundleDisplayName</key><string>SunmiMgr</string>
+            <key>CFBundleIdentifier</key><string>br.tfs.sunmimgr</string>
+            <key>CFBundleVersion</key><string>@VERSION@</string>
+            <key>CFBundleShortVersionString</key><string>@VERSION@</string>
+            <key>CFBundleExecutable</key><string>sunmimgr</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>NSHighResolutionCapable</key><true/>
+            <key>LSMinimumSystemVersion</key><string>11.0</string>
+          </dict>
+          </plist>
+          EOF
+          mkdir -p dist
+          zip -r -q "dist/sunmimgr-${{ matrix.name }}.zip" "$APP"
+          cp "target/aarch64-apple-darwin/release/sunmi-ui" dist/ 2>/dev/null || true
+
+      - name: Package (Linux tar.gz)
+        if: matrix.name == 'linux-x86_64'
+        shell: bash
+        run: |
+          mkdir -p dist/sunmimgr
+          cp target/x86_64-unknown-linux-gnu/release/sunmi-ui dist/sunmimgr/sunmimgr
+          cp README.md dist/sunmimgr/
+          mkdir -p dist/sunmimgr/udev
+          cat > dist/sunmimgr/udev/51-sunmi.rules <<'EOF'
+          # Sunmi POS terminals (MediaTek ADB) - USB access for adb
+          SUBSYSTEM=="usb", ATTR{idVendor}=="0e8d", ATTR{idProduct}=="2006", MODE="0666", GROUP="plugdev"
+          EOF
+          tar -czf "dist/sunmimgr-${{ matrix.name }}.tar.gz" -C dist sunmimgr
+
+      - name: Package (Windows zip)
+        if: matrix.name == 'windows-x86_64'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item target/x86_64-pc-windows-msvc/release/sunmi-ui.exe dist/sunmimgr.exe
+          Copy-Item README.md dist/
+          Compress-Archive -Path dist/sunmimgr.exe, dist/README.md -DestinationPath dist/sunmimgr-${{ matrix.name }}.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.name }}
+          path: dist/*
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" \
+              --title "sunmimgr $TAG" \
+              --notes "Multiplataforma Sunmi POS terminal manager (Rust + GPUI).
+
+          - macOS: SunmiMgr.app (Apple Silicon) — arraste para /Applications
+          - Linux: tar.gz com binário + regra udev em udev/51-sunmi.rules
+          - Windows: sunmimgr.exe
+
+          Backend ADB nativo (USB puro, sem adb/fastboot externos);
+          fastboot via binário do sistema é usado apenas para flash de ROM."
+          fi
