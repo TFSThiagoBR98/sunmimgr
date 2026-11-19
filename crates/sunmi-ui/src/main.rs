@@ -154,6 +154,9 @@ async fn install_files(files: &[String]) {
             } => {
                 println!("[{serial}] failed: {} {:?}: {error}", item.kind, item.path);
             }
+            DownloadEvent::DeviceFailed { serial, error } => {
+                println!("[{serial}] device failed: {error}");
+            }
             DownloadEvent::DeviceFinished { serial, ok } => {
                 println!("[{serial}] finished ({})", if ok { "ok" } else { "failed" });
             }

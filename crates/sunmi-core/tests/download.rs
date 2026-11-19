@@ -132,9 +132,8 @@ async fn stop_cancels_before_items_run() {
     );
 
     let events = collect(rx).await;
-    assert!(events.contains(&DownloadEvent::ItemFailed {
+    assert!(events.contains(&DownloadEvent::DeviceFailed {
         serial: "FAKE01".into(),
-        item: item.clone(),
         error: "download stopped".into(),
     }));
     assert!(events.contains(&DownloadEvent::DeviceFinished {

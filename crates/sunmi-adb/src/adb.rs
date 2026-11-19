@@ -82,6 +82,29 @@ impl Adb {
         self.run(&["-s", serial, "shell", command]).await
     }
 
+    /// `adb -s <serial> push <local> <remote>`.
+    pub async fn push(
+        &self,
+        serial: &str,
+        local: &std::path::Path,
+        remote: &str,
+    ) -> Result<String, ToolError> {
+        self.run(&[
+            "-s",
+            serial,
+            "push",
+            &local.display().to_string(),
+            remote,
+        ])
+        .await
+    }
+
+    /// `systool version` — version info exchanged between the Sunmi PC tools
+    /// and the firmware daemon (`systool_versioncode`, `systool_tmp_dir`).
+    pub async fn version(&self, serial: &str) -> Result<String, ToolError> {
+        self.run(&["-s", serial, "shell", "systool", "version"]).await
+    }
+
     /// Port of `reboot_to_sunmiboot`.
     pub async fn reboot_bootloader(&self, serial: &str) -> Result<String, ToolError> {
         self.run(&["-s", serial, "reboot", "bootloader"]).await

@@ -18,6 +18,19 @@ use crate::filetype::FileKind;
 /// Kinds accepted by this flow (port scope: App, Apn, AppCrp).
 pub const SUPPORTED_KINDS: [FileKind; 3] = [FileKind::App, FileKind::Apn, FileKind::AppCrp];
 
+/// Where files are staged on the device before `systool install` runs.
+///
+/// The firmware reports its own staging dir via `systool version`
+/// (`systool_tmp_dir=...`); when it is empty (observed on P2-A11 4.0.69,
+/// production build) the tools fall back to this. `/data/local/tmp` was
+/// validated against a production P2-A11: push via the sync service works
+/// and the daemon reads the file from there.
+///
+/// Production Sunmi firmware blocks generic `shell:` commands (POS secure
+/// builds), but the daemon's route (`shell:systool ...`) stays whitelisted —
+/// that is why installation is push + systool, never a shell script.
+pub const FALLBACK_TMP_DIR: &str = "/data/local/tmp";
+
 /// One file queued for installation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DownloadItem {
@@ -33,15 +46,22 @@ impl DownloadItem {
         }
     }
 
-    /// `systool` arguments forwarded over `adb shell`
-    /// (port of the switch in `thread_dt_withtool`).
-    pub fn systool_args(&self) -> Result<String, DownloadError> {
+    /// `systool` arguments forwarded over `adb shell`, installing the file
+    /// already staged on the device (port of the switch in
+    /// `thread_dt_withtool`).
+    pub fn systool_args_for(&self, device_path: &str) -> Result<String, DownloadError> {
         if !SUPPORTED_KINDS.contains(&self.kind) {
             return Err(DownloadError::UnsupportedKind(self.kind.label()));
         }
         self.kind
-            .systool_command(&self.path.display().to_string())
+            .systool_command(device_path)
             .ok_or(DownloadError::UnsupportedKind(self.kind.label()))
+    }
+
+    /// `systool` arguments for the local file path (kept for tests; the real
+    /// flow stages the file on the device first — see `run_device`).
+    pub fn systool_args(&self) -> Result<String, DownloadError> {
+        self.systool_args_for(&self.path.display().to_string())
     }
 }
 
@@ -87,6 +107,33 @@ pub struct SystoolResponse {
     pub msg: String,
 }
 
+/// Result of `systool version`
+/// (`systool_versioncode=N`, `systool_tmp_dir=path`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SystoolVersion {
+    pub version_code: Option<i64>,
+    pub tmp_dir: Option<String>,
+}
+
+/// Parses the `systool version` output; the empty `systool_tmp_dir=`
+/// reported by the firmware yields `None` (caller applies the fallback).
+pub fn parse_systool_version(output: &str) -> SystoolVersion {
+    let mut version = SystoolVersion::default();
+    for line in output.lines() {
+        let line = line.trim();
+        if let Some(code) = line.strip_prefix("systool_versioncode=") {
+            version.version_code = code.parse().ok();
+        }
+        if let Some(dir) = line.strip_prefix("systool_tmp_dir=") {
+            let dir = dir.trim();
+            if !dir.is_empty() {
+                version.tmp_dir = Some(dir.to_string());
+            }
+        }
+    }
+    version
+}
+
 /// Port of the original result check: the first line starting with `{"ret`
 /// is the response; adb may prepend daemon preamble lines.
 pub fn parse_systool_response(output: &str) -> Result<SystoolResponse, DownloadError> {
@@ -121,6 +168,9 @@ pub enum DownloadEvent {
         item: DownloadItem,
         error: String,
     },
+    /// Hard device-level failure before any item could run (e.g. could not
+    /// resolve the device tmp dir).
+    DeviceFailed { serial: String, error: String },
     /// Device finished its queue; `ok == false` means it stopped early
     /// (error, stop request or timeout), like the original per-device break.
     DeviceFinished { serial: String, ok: bool },
@@ -215,6 +265,23 @@ impl Downloader {
     }
 }
 
+/// Runs one stop/timeout-guarded adb invocation against the device deadline.
+macro_rules! guarded {
+    ($options:expr, $deadline:expr, $fut:expr) => {
+        tokio::select! {
+            _ = $options.stop.cancelled() => Err(DownloadError::Stopped),
+            r = tokio::time::timeout(
+                $deadline.saturating_duration_since(Instant::now()),
+                $fut,
+            ) => match r {
+                Ok(Ok(value)) => Ok(value),
+                Ok(Err(e)) => Err(e.into()),
+                Err(_elapsed) => Err(DownloadError::Timeout),
+            },
+        }
+    };
+}
+
 async fn run_device(
     adb: sunmi_adb::Adb,
     serial: String,
@@ -224,6 +291,29 @@ async fn run_device(
 ) {
     let deadline = Instant::now() + options.timeout;
     let mut ok = true;
+
+    // Resolve the firmware's staging dir for pushed files. Hard failure
+    // before any item -> DeviceFailed (the original aborted the device run).
+    let tmp_dir = match guarded!(options, deadline, adb.version(&serial)) {
+        Ok(output) => parse_systool_version(&output)
+            .tmp_dir
+            .unwrap_or_else(|| FALLBACK_TMP_DIR.to_string()),
+        Err(error) => {
+            let _ = tx
+                .send(DownloadEvent::DeviceFailed {
+                    serial: serial.clone(),
+                    error: error.to_string(),
+                })
+                .await;
+            let _ = tx
+                .send(DownloadEvent::DeviceFinished {
+                    serial,
+                    ok: false,
+                })
+                .await;
+            return;
+        }
+    };
 
     for item in items.iter() {
         if options.stop.is_cancelled() {
@@ -249,7 +339,28 @@ async fn run_device(
             break;
         }
 
-        let args = match item.systool_args() {
+        // Stage the local file on the device: the daemon reads paths on the
+        // terminal itself, not PC paths (PC path -> ret=-3 FAILED).
+        let file_name = item
+            .path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("sunmi_file.bin");
+        let remote_path = format!("{tmp_dir}/{file_name}");
+
+        if let Err(error) = guarded!(options, deadline, adb.push(&serial, &item.path, &remote_path)) {
+            let _ = tx
+                .send(DownloadEvent::ItemFailed {
+                    serial: serial.clone(),
+                    item: item.clone(),
+                    error: error.to_string(),
+                })
+                .await;
+            ok = false;
+            break;
+        }
+
+        let args = match item.systool_args_for(&remote_path) {
             Ok(args) => args,
             Err(error) => {
                 let _ = tx
@@ -271,15 +382,8 @@ async fn run_device(
             })
             .await;
 
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        let result = tokio::select! {
-            _ = options.stop.cancelled() => Err(DownloadError::Stopped),
-            r = tokio::time::timeout(remaining, adb.systool(&serial, &args)) => match r {
-                Ok(Ok(output)) => check_response(&output),
-                Ok(Err(e)) => Err(e.into()),
-                Err(_elapsed) => Err(DownloadError::Timeout),
-            },
-        };
+        let result = guarded!(options, deadline, adb.systool(&serial, &args))
+            .and_then(|output| check_response(&output));
 
         match result {
             Ok(()) => {
@@ -366,6 +470,20 @@ mod tests {
             check_response("{\"ret\":5,\"msg\":\"auth failed\"}"),
             Err(DownloadError::Systool { ret: 5, msg: _ })
         ));
+    }
+
+    #[test]
+    fn parse_systool_version_extracts_fields() {
+        let v = parse_systool_version(
+            "systool_versioncode=1\nsystool_tmp_dir=/data/tmp/systool\n",
+        );
+        assert_eq!(v.version_code, Some(1));
+        assert_eq!(v.tmp_dir.as_deref(), Some("/data/tmp/systool"));
+
+        // P2-A11 4.0.69 reports an empty tmp dir -> fallback applies.
+        let v = parse_systool_version("systool_versioncode=1\nsystool_tmp_dir=\n");
+        assert_eq!(v.version_code, Some(1));
+        assert_eq!(v.tmp_dir, None);
     }
 
     #[test]
