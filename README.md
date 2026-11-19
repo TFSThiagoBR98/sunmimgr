@@ -82,5 +82,9 @@ GPUI na versão atual — a dependência fica comentada no `Cargo.toml` até lá
 - [ ] Fluxo ROM (reboot bootloader → scatter → fastboot)
 - [ ] Package/Script (zip com senha + executor)
 - [x] Device info (`get posinfo`) + sincronização de hora
-- [ ] UI GPUI
+- [x] UI GPUI (hello world validado em GNOME Wayland)
+- [ ] UI completa (device discovery, fila, instalar/parar, log)
+- [ ] Suporte macOS Apple Silicon (M2 ARM64): GPUI é o backend mais maduro
+      no macOS; adb/fastboot via PATH (brew); empacotamento .app; sem udev
+      (macOS dá acesso USB adb nativo)
 - [ ] ADB nativo em Rust (v2)

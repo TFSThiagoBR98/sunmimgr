@@ -20,6 +20,7 @@ thiserror = "2"
 tokio = { version = "1", features = ["process", "macros", "rt-multi-thread", "time", "sync"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 chrono = { version = "0.4", features = ["clock"] }
+async-channel = "2"
 anyhow = "1"
 
 # GPUI published to crates.io (0.2.x); the 0.3 gpui_platform split is not

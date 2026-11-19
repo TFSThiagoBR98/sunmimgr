@@ -10,6 +10,8 @@ anyhow = { workspace = true }
 sunmi-adb = { workspace = true }
 sunmi-core = { workspace = true }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
+async-channel = { workspace = true }
 gpui = { workspace = true }
 
 # TODO(gpui): enable once the GPUI Linux/Windows backend is validated against
