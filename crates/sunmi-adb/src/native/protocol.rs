@@ -117,6 +117,14 @@ where
         arg1,
         data,
     };
+    // adb >= 0x01000001 (SKIP_CHECKSUM) sends checksum = 0; only reject
+    // when a real checksum was supplied and mismatches.
+    if checksum != 0 && msg.checksum() != checksum {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "adb: corrupted message (checksum mismatch)",
+        ));
+    }
     if magic != !command {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,

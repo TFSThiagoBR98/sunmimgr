@@ -7,8 +7,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use nusb::transfer::Bulk;
-use rsa::RsaPrivateKey;
-use tokio::io::AsyncReadExt as _;
 use tokio::sync::{mpsc, oneshot, Mutex as AsyncMutex};
 use tokio_util::sync::CancellationToken;
 
@@ -52,7 +50,6 @@ struct StreamState {
 pub struct Transport {
     pub serial: String,
     writer: AsyncMutex<Box<dyn tokio::io::AsyncWrite + Unpin + Send>>,
-    key: Arc<RsaPrivateKey>,
     streams: Mutex<HashMap<u32, StreamState>>,
     next_local: AtomicU32,
     max_payload: std::sync::atomic::AtomicUsize,
@@ -124,13 +121,13 @@ impl Transport {
                 .map_err(|e| ToolError::Protocol(format!("usb in endpoint: {e}")))?
                 .reader(4096));
 
-        let key = Arc::new(keys::host_key().await?.clone());
+        // Force the host key to load now so auth failures surface here.
+        let _ = keys::host_key().await?;
         let serial = r#ref.serial.clone().unwrap_or_else(|| "unknown".to_string());
 
         let transport = Arc::new(Self {
             serial: serial.clone(),
             writer: AsyncMutex::new(writer),
-            key,
             streams: Mutex::new(HashMap::new()),
             next_local: AtomicU32::new(1),
             max_payload: std::sync::atomic::AtomicUsize::new(4096),
