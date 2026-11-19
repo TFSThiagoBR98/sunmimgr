@@ -83,6 +83,23 @@ Planejada com [GPUI](https://github.com/zed-industries/zed) (framework do Zed).
 Antes de ativar a dependência, validar o suporte do backend Linux/Windows do
 GPUI na versão atual — a dependência fica comentada no `Cargo.toml` até lá.
 
+## Releases
+
+Tag `v*` dispara o workflow de release (`.github/workflows/release.yml`)
+que empacota e publica automaticamente no GitHub Release:
+
+| Pacote | Conteúdo |
+|---|---|
+| `sunmimgr-macos-arm64.zip` | `SunmiMgr.app` (Apple Silicon, M1/M2/M3) |
+| `sunmimgr-linux-x86_64.tar.gz` | binário + README + regra udev (`udev/51-sunmi.rules`) |
+| `sunmimgr-windows-x86_64.zip` | `sunmimgr.exe` |
+
+## Nota de segurança
+
+`cargo audit` reporta `rsa 0.9` com o advisory teórico do Marvin attack
+(timing side-channel de decriptação). Não se aplica ao uso aqui: a chave do
+host só **assina tokens AUTH** localmente (não decripta segredos remotos).
+
 ## Roadmap
 
 - [x] Scaffold do workspace
