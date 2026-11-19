@@ -60,7 +60,7 @@ GPUI na versão atual — a dependência fica comentada no `Cargo.toml` até lá
 - [x] Scaffold do workspace
 - [x] `sunmi-core`: modelos de domínio
 - [x] `sunmi-adb`: wrapper adb/fastboot (spawn)
-- [ ] Loop de download (1 task por dispositivo, stop/timeout)
+- [x] Loop de download (App/Apn/AppCrp — 1 task por dispositivo, stop/timeout)
 - [ ] Fluxo ROM (reboot bootloader → scatter → fastboot)
 - [ ] Package/Script (zip com senha + executor)
 - [ ] Device info (`get posinfo`) + sincronização de hora
