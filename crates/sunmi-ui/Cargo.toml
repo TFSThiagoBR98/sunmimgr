@@ -1,0 +1,17 @@
+[package]
+name = "sunmi-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+sunmi-adb = { workspace = true }
+sunmi-core = { workspace = true }
+tokio = { workspace = true }
+
+# TODO(gpui): enable once the GPUI Linux/Windows backend is validated against
+# the current Zed main. Until then `sunmi-ui` runs as a CLI smoke test.
+# [dependencies.gpui]
+# git = "https://github.com/zed-industries/zed"
