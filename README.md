@@ -77,7 +77,8 @@ GPUI na versão atual — a dependência fica comentada no `Cargo.toml` até lá
 - [x] `sunmi-adb`: wrapper adb/fastboot (spawn)
 - [x] Loop de download (App/Apn/AppCrp — 1 task por dispositivo, stop/timeout)
 - [x] Fluxo de instalação validado em terminal real de produção
-      (P2-A11: push sync → `systool install arp` → `{"ret":0}`)
+      (P2-A11 4.0.69: App `br.com.fly.pay.pdv.p2` 60→61, AppCrp
+      `{"ret":0,"msg":"OK"}`, Apn `{"ret":0}` — push sync → systool install)
 - [ ] Fluxo ROM (reboot bootloader → scatter → fastboot)
 - [ ] Package/Script (zip com senha + executor)
 - [x] Device info (`get posinfo`) + sincronização de hora
