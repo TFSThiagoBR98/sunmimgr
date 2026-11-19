@@ -8,8 +8,7 @@ macro_rules! platforms {
             #[cfg(any($(target_os = $platform),*))]
             pub use self::$module::*;
 
-            #[cfg(any($(target_os = $platform),*))]
-            pub const ENOATTR: ::libc::c_int = ::libc::ENODATA;
+
         )*
 
         #[cfg(all(feature = "unsupported", not(any($($(target_os = $platform),*),*))))]
@@ -38,3 +37,10 @@ platforms! {
     "android"; "linux"; "macos" => linux_macos,
     "freebsd"; "netbsd" => bsd
 }
+
+// Newer libc releases removed ENOATTR on Linux (it was always an alias of
+// ENODATA there); macOS libc only defines ENOATTR. Keep both building.
+#[cfg(target_os = "macos")]
+pub const ENOATTR: ::libc::c_int = ::libc::ENOATTR;
+#[cfg(not(target_os = "macos"))]
+pub const ENOATTR: ::libc::c_int = ::libc::ENODATA;

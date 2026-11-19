@@ -83,8 +83,30 @@ GPUI na versão atual — a dependência fica comentada no `Cargo.toml` até lá
 - [ ] Package/Script (zip com senha + executor)
 - [x] Device info (`get posinfo`) + sincronização de hora
 - [x] UI GPUI (hello world validado em GNOME Wayland)
-- [ ] UI completa (device discovery, fila, instalar/parar, log)
-- [ ] Suporte macOS Apple Silicon (M2 ARM64): GPUI é o backend mais maduro
-      no macOS; adb/fastboot via PATH (brew); empacotamento .app; sem udev
-      (macOS dá acesso USB adb nativo)
+- [x] UI completa (device discovery, fila, instalar/parar, log scrollable)
+- [x] Validação de compilação macOS Apple Silicon (cross-check do Linux;
+      build nativo/CI no macos-14 é o gate oficial — ver abaixo)
+- [ ] Suporte macOS M2: runtime smoke test no hardware real + .app bundle
 - [ ] ADB nativo em Rust (v2)
+
+## macOS Apple Silicon (M2 ARM64)
+
+Status da validação (sem hardware macOS neste ambiente):
+
+| Item | Resultado |
+|---|---|
+| `sunmi-core` + `sunmi-adb` → `cargo check --target aarch64-apple-darwin` | ✅ limpo |
+| Idem `x86_64-apple-darwin` (Intel) | ✅ limpo |
+| Toolchain de cross-compile (`scripts/check-darwin.sh`, zig cc) | ✅ ring/psm etc. compilam Mach-O |
+| Workspace completo (gpui) via cross-check | ⚠️ para em `gpui_media` — build script usa bindgen contra o SDK (`xcrun --show-sdk-path`); exige SDK do macOS |
+| Build + testes nativos | 🔄 `.github/workflows/darwin-check.yml` (runner `macos-14`, ARM) — gate oficial |
+
+Notas de portabilidade:
+- `vendor/xattr` corrigido para as duas libc: `ENOATTR` no macOS, `ENODATA`
+  no Linux (a crate 0.2.3 original só usava `ENOATTR`, removida da libc
+  Linux nova)
+- `rust-toolchain.toml` (1.99.1) vale para os dois SOs
+- No macOS o adb/fastboot vêm via PATH (brew) — `Adb::discover()` já
+  resolve; sem regras udev (o macOS autoriza USB adb nativamente)
+- A titlebar CSD usa os controles do GPUI (`minimize_window`/
+  `remove_window`), que funcionam igual no macOS
