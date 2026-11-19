@@ -1,17 +1,37 @@
 //! sunmi-ui — application crate.
 //!
-//! Today: CLI smoke test that proves the `sunmi-adb` backend wiring.
+//! Today: CLI smoke test + `install` flow over the `sunmi-core` downloader.
 //! Next: GPUI window (dependency is commented out in Cargo.toml until the
 //! Linux backend is validated).
 
+use std::path::PathBuf;
+use std::sync::Arc;
+
 use sunmi_adb::Adb;
+use sunmi_core::download::{
+    validate, DownloadEvent, DownloadItem, DownloadOptions, Downloader,
+};
+use sunmi_core::filetype::FileKind;
 
 #[tokio::main]
 async fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.first().map(String::as_str) {
+        Some("install") if args.len() > 1 => install_files(&args[1..]).await,
+        _ => list_devices().await,
+    }
+}
+
+async fn adb_or_exit() -> Adb {
     let Some(adb) = Adb::discover() else {
         eprintln!("'adb' not found in PATH. Install platform-tools or set PATH.");
         std::process::exit(1);
     };
+    adb
+}
+
+async fn list_devices() {
+    let adb = adb_or_exit().await;
 
     match adb.devices().await {
         Ok(devices) if devices.is_empty() => println!("No ADB devices found."),
@@ -31,6 +51,71 @@ async fn main() {
         Err(e) => {
             eprintln!("adb devices failed: {e}");
             std::process::exit(1);
+        }
+    }
+}
+
+/// `sunmi-ui install <file...>` — file kind is auto-detected
+/// (App: .apk, Apn: .apn, AppCrp: other .zip) and installed on every
+/// connected device.
+async fn install_files(files: &[String]) {
+    let adb = adb_or_exit().await;
+    let downloader = Downloader::new(adb);
+
+    let serials = match downloader.connected().await {
+        Ok(serials) => serials,
+        Err(e) => {
+            eprintln!("adb devices failed: {e}");
+            std::process::exit(1);
+        }
+    };
+    if serials.is_empty() {
+        eprintln!("No devices in 'device' state.");
+        std::process::exit(1);
+    }
+    println!("Installing on {} device(s): {serials:?}", serials.len());
+
+    let mut items = Vec::new();
+    for file in files {
+        let path = PathBuf::from(file)
+            .canonicalize()
+            .unwrap_or_else(|e| {
+                eprintln!("File not found: {file} ({e})");
+                std::process::exit(1);
+            });
+        let kind = FileKind::detect(
+            path.file_name().and_then(|n| n.to_str()).unwrap_or(file),
+        )
+        .unwrap_or_else(|| {
+            eprintln!("Unknown file type, please set it manually: {file}");
+            std::process::exit(1);
+        });
+        items.push(DownloadItem::new(kind, path));
+    }
+
+    if let Err(e) = validate(&items) {
+        eprintln!("Invalid queue: {e}");
+        std::process::exit(1);
+    }
+
+    let mut rx = downloader.run(serials, Arc::new(items), DownloadOptions::default());
+    while let Some(event) = rx.recv().await {
+        match event {
+            DownloadEvent::ItemStarted { serial, item } => {
+                println!("[{serial}] installing {} {:?} ...", item.kind, item.path);
+            }
+            DownloadEvent::ItemCompleted { serial, item } => {
+                println!("[{serial}] done: {} {:?} ✅", item.kind, item.path);
+            }
+            DownloadEvent::ItemFailed {
+                serial, item, error,
+            } => {
+                println!("[{serial}] failed: {} {:?}: {error}", item.kind, item.path);
+            }
+            DownloadEvent::DeviceFinished { serial, ok } => {
+                println!("[{serial}] finished ({})", if ok { "ok" } else { "failed" });
+            }
+            DownloadEvent::Finished => break,
         }
     }
 }

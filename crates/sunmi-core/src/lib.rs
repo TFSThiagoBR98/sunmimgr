@@ -6,6 +6,7 @@
 //! `systool` commands (executed on the device by the Sunmi firmware daemon).
 
 pub mod config;
+pub mod download;
 pub mod filetype;
 pub mod package;
 pub mod script;
