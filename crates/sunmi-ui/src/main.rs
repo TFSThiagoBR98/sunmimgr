@@ -18,6 +18,7 @@ async fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("install") if args.len() > 1 => install_files(&args[1..]).await,
+        Some("info") => device_info().await,
         _ => list_devices().await,
     }
 }
@@ -51,6 +52,47 @@ async fn list_devices() {
         Err(e) => {
             eprintln!("adb devices failed: {e}");
             std::process::exit(1);
+        }
+    }
+}
+
+/// `sunmi-ui info` — syncs the terminal clock and prints the `posinfo`
+/// table (port of the original Refresh flow: `updatetime` + `get posinfo`).
+async fn device_info() {
+    let adb = adb_or_exit().await;
+    let downloader = Downloader::new(adb);
+
+    let serials = match downloader.connected().await {
+        Ok(serials) => serials,
+        Err(e) => {
+            eprintln!("adb devices failed: {e}");
+            std::process::exit(1);
+        }
+    };
+    if serials.is_empty() {
+        eprintln!("No devices in 'device' state.");
+        std::process::exit(1);
+    }
+
+    for serial in &serials {
+        match downloader.sync_time(serial).await {
+            Ok(_) => println!("[{serial}] clock synced"),
+            Err(e) => println!("[{serial}] clock sync failed: {e}"),
+        }
+        match downloader.term_info(serial).await {
+            Ok(info) => {
+                println!("[{serial}] terminal info:");
+                for (label, value) in info.display_rows() {
+                    println!("  {label:<18} {value}");
+                }
+                if let Some(battery) = info.battery_percent() {
+                    println!("  {:<18} {battery}%", "Battery");
+                }
+                if let Some(free_mb) = info.data_free_space_mb() {
+                    println!("  {:<18} {free_mb} MB", "Data free space");
+                }
+            }
+            Err(e) => println!("[{serial}] get posinfo failed: {e}"),
         }
     }
 }

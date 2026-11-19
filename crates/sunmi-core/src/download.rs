@@ -157,6 +157,19 @@ impl Downloader {
         Self { adb }
     }
 
+    /// `systool get posinfo` parsed (port of the device-info refresh flow).
+    pub async fn term_info(&self, serial: &str) -> Result<crate::terminfo::TmInfo, DownloadError> {
+        let output = self.adb.systool(serial, "get posinfo").await?;
+        crate::terminfo::parse_tm_info(&output)
+    }
+
+    /// Syncs the terminal clock to the workstation's local time
+    /// (port of `updatetime`).
+    pub async fn sync_time(&self, serial: &str) -> Result<String, sunmi_adb::ToolError> {
+        let ts = crate::terminfo::timestamp_now();
+        self.adb.systool(serial, &format!("set time {ts}")).await
+    }
+
     /// Serials of devices currently in `device` state
     /// (port of `find_sunmitool_device`).
     pub async fn connected(&self) -> Result<Vec<String>, sunmi_adb::ToolError> {

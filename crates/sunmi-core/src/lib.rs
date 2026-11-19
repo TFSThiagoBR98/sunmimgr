@@ -10,3 +10,4 @@ pub mod download;
 pub mod filetype;
 pub mod package;
 pub mod script;
+pub mod terminfo;

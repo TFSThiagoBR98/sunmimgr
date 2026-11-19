@@ -12,4 +12,5 @@ regex = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
+chrono = { workspace = true }
 sunmi-adb = { workspace = true }
